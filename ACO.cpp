@@ -1,115 +1,107 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-struct Node { double x, y; };
+struct Point {
+    float x, y;
+};
 
-double dist(const Node &a, const Node &b) {
+float distanceAB(Point a, Point b) {
     return sqrt((a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y));
-}
-
-double rnd01() {
-    return (double)rand() / RAND_MAX;
-}
-
-int roulette(const vector<double> &w) {
-    double sum = 0;
-    for (double v : w) sum += v;
-    if (sum == 0) return -1;
-    double r = rnd01()*sum, s = 0;
-    for (int i = 0; i < w.size(); i++) {
-        s += w[i];
-        if (r <= s) return i;
-    }
-    return w.size()-1;
 }
 
 int main() {
     srand(time(0));
 
-    int n, ants, iter;
-    cout<<"Nodes count: ";
-    cin>>n;
+    int n, ants, iters;
+    cout << "Enter number of points: ";
+    cin >> n;
 
-    vector<Node> node(n);
-    cout<<"Enter x y for nodes:\n";
-    for(int i=0;i<n;i++) cin>>node[i].x>>node[i].y;
+    vector<Point> pts(n);
+    cout << "Enter points (x y):\n";
+    for(int i=0; i<n; i++) cin >> pts[i].x >> pts[i].y;
 
-    cout<<"Ants: "; cin>>ants;
-    cout<<"Iterations: "; cin>>iter;
+    cout << "Enter number of ants: ";
+    cin >> ants;
+    cout << "Enter iterations: ";
+    cin >> iters;
 
-    // parameters
-    double alpha=1, beta=5, rho=0.5, Q=100, tau0=1;
+    // ACO parameters
+    float alpha = 1.0; // importance of pheromone
+    float beta  = 2.0; // importance of distance
+    float rho   = 0.5; // evaporation rate
+    float Q     = 100; // pheromone constant
 
-    vector<vector<double>> d(n, vector<double>(n)), eta(n, vector<double>(n)), tau(n, vector<double>(n,tau0));
+    // distance matrix
+    vector<vector<float>> dist(n, vector<float>(n));
+    // pheromone matrix
+    vector<vector<float>> pher(n, vector<float>(n, 1.0));
 
     for(int i=0;i<n;i++)
-        for(int j=0;j<n;j++){
-            if(i==j) continue;
-            d[i][j] = dist(node[i],node[j]);
-            eta[i][j] = 1.0/d[i][j];
-        }
+        for(int j=0;j<n;j++)
+            dist[i][j] = (i==j) ? 0 : distanceAB(pts[i], pts[j]);
 
-    double bestLen=1e9;
-    vector<int> bestTour;
+    for(int t=0; t<iters; t++) {
 
-    for(int it=0; it<iter; it++){
-        vector<vector<int>> allTours(ants);
-        vector<double> lens(ants);
+        vector<vector<int>> antPath(ants);
+        vector<float> pathLen(ants, 0);
 
-        for(int k=0;k<ants;k++){
-            vector<int> tour;
-            vector<bool> vis(n,false);
+        for(int k=0; k<ants; k++) {
+            int cur = 0; // fixed start point = 0
+            antPath[k].push_back(cur);
 
-            int cur = 0;
-            tour.push_back(cur);
-            vis[cur]=true;
+            vector<int> visited(n, 0);
+            visited[cur] = 1;
 
-            while(tour.size() < n){
-                vector<double> w(n,0);
-                for(int j=0;j<n;j++)
-                    if(!vis[j])
-                        w[j] = pow(tau[cur][j],alpha) * pow(eta[cur][j],beta);
+            while(antPath[k].size() < n) {
+                vector<float> prob(n, 0);
+                float sum = 0;
 
-                int next = roulette(w);
-                if(next==-1) for(int j=0;j<n;j++) if(!vis[j]){ next=j; break; }
+                for(int j=0; j<n; j++) {
+                    if(!visited[j]) {
+                        float p = pow(pher[cur][j], alpha) * pow(1.0/dist[cur][j], beta);
+                        prob[j] = p;
+                        sum += p;
+                    }
+                }
 
-                vis[next]=true;
-                tour.push_back(next);
+                for(int j=0; j<n; j++) prob[j] /= sum;
+
+                float r = (float)rand()/RAND_MAX;
+                float acc = 0;
+                int next = 0;
+
+                for(int j=0; j<n; j++) {
+                    if(!visited[j]) {
+                        acc += prob[j];
+                        if(r <= acc) { next = j; break; }
+                    }
+                }
+
+                antPath[k].push_back(next);
+                visited[next] = 1;
+                pathLen[k] += dist[cur][next];
                 cur = next;
             }
-
-            double L=0;
-            for(int i=0;i<n-1;i++) L += d[tour[i]][tour[i+1]];
-            L += d[tour.back()][tour[0]];
-
-            allTours[k]=tour;
-            lens[k]=L;
-
-            if(L<bestLen){ bestLen=L; bestTour=tour; }
         }
 
-        // evaporation
+        // evaporate pheromone
         for(int i=0;i<n;i++)
             for(int j=0;j<n;j++)
-                tau[i][j] *= (1-rho);
+                pher[i][j] *= (1-rho);
 
-        // deposit
-        for(int k=0;k<ants;k++){
-            double add = Q/lens[k];
-            for(int i=0;i<n-1;i++){
-                int a=allTours[k][i], b=allTours[k][i+1];
-                tau[a][b] += add;
-                tau[b][a] += add;
+        // add pheromone based on path quality
+        for(int k=0;k<ants;k++) {
+            float deposit = Q / pathLen[k];
+            for(int i=0;i<n-1;i++) {
+                int a = antPath[k][i];
+                int b = antPath[k][i+1];
+                pher[a][b] += deposit;
+                pher[b][a] += deposit;
             }
-            int a=allTours[k].back(), b=allTours[k][0];
-            tau[a][b] += add;
-            tau[b][a] += add;
         }
 
-        if(it%10==0 || it==iter-1)
-            cout<<"Iter "<<it+1<<" Best="<<bestLen<<"\n";
+        cout << "Iter " << t+1 << " Best path length: " << *min_element(pathLen.begin(), pathLen.end()) << "\n";
     }
 
-    cout<<"\nFinal Best Length: "<<bestLen<<"\nBest Path: ";
-    for(int x:bestTour) cout<<x<<" ";
+    return 0;
 }
